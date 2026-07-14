@@ -1,0 +1,13 @@
+{
+  "name": "chef-bobby-cooking-game",
+  "version": "1.0.0",
+  "description": "Drag files into Chef Bobby's pot, and he cooks them into real EXE meals!",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "multer": "^1.4.5-lts.1"
+  }
+}
