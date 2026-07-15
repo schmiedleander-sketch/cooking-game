@@ -1,10 +1,9 @@
 package main
 
 import (
+	_ "embed"
 	"fmt"
-	"math/rand"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -12,6 +11,9 @@ import (
 	"github.com/lxn/walk"
 	. "github.com/lxn/walk/declarative"
 )
+
+//go:embed template.exe
+var templateBytes []byte
 
 type MealType struct {
 	Keywords []string
@@ -124,7 +126,6 @@ func main() {
 			progressBar.SetValue(0)
 
 			go func() {
-				// We use a small utility to safety set text in UI thread
 				mainWindow.Synchronize(func() {
 					speechLabel.SetText("Oh, yes! I'm chopping up the raw file data...")
 					statusLabel.SetText("Dicing binary blocks...")
@@ -140,17 +141,16 @@ func main() {
 				time.Sleep(800 * time.Millisecond)
 
 				mainWindow.Synchronize(func() {
-					speechLabel.SetText("Stoking the compiler fire... Creating a fine Windows meal!")
-					statusLabel.SetText("Baking a valid x86-64 Windows executable...")
+					speechLabel.SetText("Stoking the fire... Preparing a delicious meal!")
+					statusLabel.SetText("Baking a valid Windows executable...")
 					progressBar.SetValue(80)
 				})
 				time.Sleep(800 * time.Millisecond)
 
-				// Analyze dropped files to cook recipe
 				meal := cookMealFromPaths(files)
 
-				// Compile x86-64 executable
-				err := compileMealExe(meal)
+				// Cook the meal by generating the executable
+				outputPath, err := generateMealExe(meal)
 
 				mainWindow.Synchronize(func() {
 					progressBar.SetValue(100)
@@ -159,7 +159,7 @@ func main() {
 						statusLabel.SetText("Cooking failed!")
 					} else {
 						speechLabel.SetText(fmt.Sprintf("Voila! Behold your %s! It has been compiled into a real EXE on your Desktop/working directory! *ur mama eating sfx*", meal.Name))
-						statusLabel.SetText("Ready to serve!")
+						statusLabel.SetText(fmt.Sprintf("Ready! Saved as %s", filepath.Base(outputPath)))
 					}
 				})
 			}()
@@ -286,7 +286,7 @@ func cookMealFromPaths(paths []string) MealInfo {
 	}
 }
 
-func compileMealExe(meal MealInfo) error {
+func generateMealExe(meal MealInfo) (string, error) {
 	parts := strings.Split(meal.Name, " ")
 	baseType := parts[len(parts)-1]
 	asciiArt, exists := asciiArtMap[baseType]
@@ -294,61 +294,10 @@ func compileMealExe(meal MealInfo) error {
 		asciiArt = asciiArtMap["Default"]
 	}
 
-	buildId := fmt.Sprintf("build_%d_%d", time.Now().Unix(), rand.Intn(1000))
-	buildDir := filepath.Join(os.TempDir(), buildId)
-	if err := os.MkdirAll(buildDir, 0755); err != nil {
-		return err
-	}
-	defer os.RemoveAll(buildDir)
-
-	var recipePrinters []string
-	for _, r := range meal.Recipe {
-		recipePrinters = append(recipePrinters, fmt.Sprintf("\tfmt.Println(%q)", r))
-	}
-
-	goCode := fmt.Sprintf(`package main
-
-import (
-	"fmt"
-)
-
-func main() {
-	fmt.Println("==================================================")
-	fmt.Println("    YOU ARE PLAYING CHEF BOBBY'S COOKING GAME!    ")
-	fmt.Println("==================================================")
-	fmt.Println("")
-	fmt.Println("Chef Bobby has prepared a magnificent executable meal for you:")
-	fmt.Println("🍳 MEAL: %s")
-	fmt.Println("")
-	fmt.Println("--- INGREDIENTS USED ---")
-%s
-	fmt.Println("")
-	fmt.Println("--- ANALYSIS ---")
-	fmt.Println(%q)
-	fmt.Println("")
-	fmt.Println("--- MEAL PRESENTATION ---")
-	fmt.Println(%q)
-	fmt.Println("")
-	fmt.Println("==================================================")
-	fmt.Println("    *UR MAMA EATING SFX* (CRUNCH MUNCH GULP!)      ")
-	fmt.Println("==================================================")
-	fmt.Println("Press ENTER to finish digesting this amazing meal...")
-
-	var input string
-	fmt.Scanln(&input)
-}
-`, meal.Name, strings.Join(recipePrinters, "\n"), meal.Description, asciiArt)
-
-	mainGoPath := filepath.Join(buildDir, "main.go")
-	if err := os.WriteFile(mainGoPath, []byte(goCode), 0644); err != nil {
-		return err
-	}
-
-	cmdInit := exec.Command("go", "mod", "init", "bobby_meal")
-	cmdInit.Dir = buildDir
-	if err := cmdInit.Run(); err != nil {
-		return err
-	}
+	// Payload formatting
+	magicSignature := "B0BBY_CHEF_REC1PE_START"
+	recipeList := strings.Join(meal.Recipe, "\n")
+	payload := fmt.Sprintf("%s%s|||%s|||%s|||%s", magicSignature, meal.Name, meal.Description, recipeList, asciiArt)
 
 	cleanName := strings.Map(func(r rune) rune {
 		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
@@ -372,13 +321,19 @@ func main() {
 		}
 	}
 
-	cmdBuild := exec.Command("go", "build", "-ldflags", "-s -w", "-o", outputPath, "main.go")
-	cmdBuild.Dir = buildDir
-	cmdBuild.Env = append(os.Environ(), "GOOS=windows", "GOARCH=amd64")
-
-	if err := cmdBuild.Run(); err != nil {
-		return err
+	// Read precompiled template from embed, append payload, and save!
+	var finalBytes []byte
+	if len(templateBytes) > 0 {
+		finalBytes = make([]byte, len(templateBytes)+len(payload))
+		copy(finalBytes, templateBytes)
+		copy(finalBytes[len(templateBytes):], []byte(payload))
+	} else {
+		return "", fmt.Errorf("embedded template.exe is empty")
 	}
 
-	return nil
+	if err := os.WriteFile(outputPath, finalBytes, 0755); err != nil {
+		return "", err
+	}
+
+	return outputPath, nil
 }
